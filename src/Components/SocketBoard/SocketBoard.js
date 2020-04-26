@@ -1,0 +1,210 @@
+import React from 'react';
+import SocketBoardControls from './SocketBoardControls';
+
+export default class SocketBoard extends React.Component {
+    constructor(props) {
+        super(props);
+        this.state = {
+            height: 400,
+            width: 375
+        };
+        this.mouseDown = false;
+        
+        this.lastx = 0;
+        this.lasty = 0;
+
+
+        this.memCanvas = document.createElement("canvas");
+        this.memCanvas.width = this.state.width;
+        this.memCanvas.height = this.state.height;
+        this.memCtx = this.memCanvas.getContext("2d");
+
+        this.canvas = React.createRef();
+
+        this.points = [];
+
+        this.handleMouseMove = this.handleMouseMove.bind(this);
+        this.handleMouseDown = this.handleMouseDown.bind(this);
+        this.handleMouseUp = this.handleMouseUp.bind(this);
+        this.getPoints = this.getPoints.bind(this);
+        this.drawPoints = this.drawPoints.bind(this);
+
+        //Remote Functions
+        this.handleRemotePoints = this.handleRemotePoints.bind(this);
+        this.handleRemoteStoppedDrawing = this.handleRemoteStoppedDrawing.bind(this);
+
+
+        this.socket = props.socket;
+    }
+
+    componentDidMount() {
+        this.ctx = this.canvas.current.getContext("2d");
+        this.ctx.lineWidth = 5;
+        this.ctx.lineCap = "round";
+        this.ctx.lineJoin = "round";
+
+        this.socket.on("push points", this.handleRemotePoints); // On Drawing Recieved from remote
+        this.socket.on("stopped drawing", this.handleRemoteStoppedDrawing); // On Remote has stopped drawing
+    }
+
+    /**
+     * When the user begins to click
+     */
+    handleMouseDown(e) {
+        this.mouseDown = true;
+        const {x, y} = this.getPoints(e);
+        this.points.push({
+            x,
+            y
+        });
+        this.socket.emit("push point", {room: this.props.room, x, y});
+
+    }
+    /**
+     * When the user lets up the click button
+     */
+    handleMouseUp(e) {
+        if(!this.mouseDown){ return; }
+        this.mouseDown = false;
+
+        this.memCtx.clearRect(0, 0, this.state.width, this.state.height);
+        this.memCtx.drawImage(this.canvas.current, 0, 0);
+        this.points = [];
+        this.socket.emit("stopped drawing", {room: this.props.room});
+    }
+    /**
+     * When The mouse moves
+     * @param {} e 
+     */
+    handleMouseMove(e) {
+        if(!this.mouseDown){ return; }
+        
+        const {x, y} = this.getPoints(e);
+
+        this.ctx.clearRect(0, 0, this.state.width, this.state.height);
+        this.ctx.drawImage(this.memCanvas, 0, 0);
+        this.points.push({
+            x,
+            y
+        });
+
+        this.socket.emit("push point", {room:this.props.room, x, y});
+
+        this.drawPoints();
+    }
+    
+    /**
+     * Get X and Y from events.
+     * @param {Event} e 
+     */
+    getPoints(e){
+        let {x, y} = 0;
+        const ev = e.nativeEvent;
+        if (false) {
+            x = ev.touches[0].clientX;
+            y = ev.touches[0].clientY; // CH: Is there a better way to do this?
+        }
+        else if (ev.layerX || ev.layerX === 0) { // Firefox
+            x = ev.layerX;
+            y = ev.layerY;
+        }
+        else if (ev.offsetX || ev.offsetX === 0) { // Opera
+            x = ev.offsetX;
+            y = ev.offsetY;
+        }
+    
+        x = x + 0.5;
+        return {x, y};
+    }
+
+    handleRemotePoints(data){
+        this.ctx.clearRect(0, 0, this.state.width, this.state.height);
+        this.ctx.drawImage(this.memCanvas, 0, 0);
+        this.points.push(data);
+        this.drawPoints();
+    }
+    handleRemoteStoppedDrawing(){
+        this.memCtx.clearRect(0, 0, this.state.width, this.state.height);
+        if(this.canvas.current !== null){
+            this.memCtx.drawImage(this.canvas.current, 0, 0);
+        }
+        this.points = [];
+    }
+
+
+    /**
+     * Draw the points
+     */
+    drawPoints(){
+        if(this.points < 6){ return; }
+        if( this.points < 6 ){
+            let b = this.points[0];
+            this.ctx.beginPath();
+            this.ctx.arc(b.x, b.y, this.ctx.lineWidth / 2, 0, Math.PI * 2, !0);
+            this.ctx.closePath();
+            this.ctx.fill();
+            return;
+        }
+        this.ctx.beginPath();
+        this.ctx.moveTo(this.points[0].x, this.points[0].y);
+        let it = 0;
+        for( let i=1; i < this.points.length - 2; ++i){
+            it = i;
+            let c = (this.points[i].x + this.points[i + 1].x) / 2;
+            let d = (this.points[i].y + this.points[i + 1].y) / 2;
+            this.ctx.quadraticCurveTo(this.points[i].x, this.points[i].y, c, d)
+        }
+
+        if(this.points[it + 1] !== undefined){
+            this.ctx.quadraticCurveTo(
+                this.points[it].x, 
+                this.points[it].y,
+                this.points[it + 1].x,
+                this.points[it + 1].y
+            );
+        }
+        this.ctx.stroke();
+    }
+
+
+    render() {
+        return (
+            <div>
+                <canvas
+                    style={{
+                        borderWidth: 2,
+                        borderColor: "#000",
+                        borderStyle: "solid",
+                        userSelect:"none",
+                    }}
+                    ref={this.canvas}
+    
+                    onMouseDown={this.handleMouseDown}
+                    onMouseUp={this.handleMouseUp}
+                    onMouseLeave={this.handleMouseUp}
+                    onMouseMove={this.handleMouseMove}
+
+                    onTouchStart={this.handleMouseDown}
+                    onTouchEnd={this.handleMouseUp}
+                    onTouchMove={(e)=>{ this.handleMouseMove(e); e.preventDefault(); }}
+    
+                    width={this.state.width}
+                    height={this.state.height}
+                ></canvas>
+                
+                {this.props.controls ? 
+                <SocketBoardControls 
+                socket={this.props.socket}
+                room={this.props.room}
+                canvas={this.canvas.current}
+                height={this.state.height}
+                width={this.state.width}
+                memCanvas={this.memCanvas}
+                /> 
+                : null}
+
+            </div>
+        )
+    }
+
+}
